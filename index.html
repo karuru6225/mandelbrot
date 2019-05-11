@@ -1,0 +1,231 @@
+<!doctype html>
+<html>
+  <head>
+<style>
+  html, body, canvas {
+    margin: 0;
+    padding: 0;
+  }
+  body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  canvas {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 20px);
+    margin: 10px;
+  }
+</style>
+  </head>
+  <body>
+    <div id="wrapper">
+      <canvas id="canvas">
+    </div>
+    </canvas>
+  </body>
+  <script src="./bignumber.min.js"></script>
+  <script src="./hsl2rgb.js"></script>
+  <script>
+    const wrapper = document.getElementById('wrapper');
+    const canvas = document.getElementById('canvas');
+    canvas.setAttribute('width', wrapper.offsetWidth);
+    canvas.setAttribute('height', wrapper.offsetHeight);
+    const w = canvas.width;
+    const h = canvas.height;
+    const ctx = canvas.getContext('2d');
+    const ITER = 50;
+    const THREADS = 8;
+    let gcount = 500;
+    const useNative = false;
+    let cImage;
+    let timer;
+    let isPause = true;
+    let dots = 0;
+    let lastTime = Date.now();
+    const threads = [];
+    let queue = [];
+    for (let i = 0; i < THREADS; i++) {
+      threads[i] = new Worker('calcIter.js');
+      threads[i].addEventListener('message', (e) => {
+        e.data.forEach((item) => {
+          const {
+            posy,
+            posx,
+            iter,
+          } = item;
+          drawDot(posy, posx, iter);
+        });
+        if (isPause) {
+          return;
+        }
+        if (queue.length > 0) {
+          threads[i].postMessage(queue.slice(0, gcount));
+          queue = queue.slice(gcount);
+        } else {
+          if (timer) {
+            clearInterval(timer);
+            timer = false;
+            console.timeEnd('draw');
+          }
+          render();
+        }
+      });
+    }
+
+    function getCoordinatesFromPos(posx, posy) {
+      if (useNative) {
+        const len = 3 / 2;
+        const x = posx;
+        let dx, dy;
+        if (w > h) {
+          dx = len;
+          dy = len * h / w;
+        } else {
+          dx = len * w / h;
+          dy = len;
+        }
+
+        const y = posy;
+
+        const center = {
+          x: -0.8,
+          y: 0
+        };
+
+        const tx = {
+          min: center.x - dx,
+          max: center.x + dx
+        };
+        const ty = {
+          min: center.y - dy,
+          max: center.y + dy
+        };
+
+        return {
+          x: (x / w) * ( tx.max - tx.min ) + tx.min,
+          y: (y / h) * ( ty.max - ty.min ) + ty.min
+        };
+      } else {
+        const len = (new BigNumber(3)).div(2);
+        const x = new BigNumber(posx);
+        let dx, dy;
+        if (w > h) {
+          dx = len;
+          dy = len.times(h / w);
+        } else {
+          dx = len.times(w / h);
+          dy = len;
+        }
+
+        const y = new BigNumber(posy);
+
+        const center = {
+          x: new BigNumber(-0.8),
+          y: new BigNumber(0)
+        };
+
+        const tx = {
+          min: center.x.minus(dx),
+          max: center.x.plus(dx)
+        };
+        const ty = {
+          min: center.y.minus(dy),
+          max: center.y.plus(dy)
+        };
+
+        return {
+          x: x.div(w).times( tx.max.minus( tx.min ) ).plus( tx.min ).toString(),
+          y: y.div(h).times( ty.max.minus( ty.min ) ).plus( ty.min ).toString()
+        };
+      }
+    }
+
+    function flushMandelbrot() {
+      console.time('draw');
+      ctx.fillStyle = 'white';
+      ctx.fillRect(0, 0, w, h);
+      cImage = ctx.getImageData(0, 0, w, h);
+      for (let posy = 0; posy < h; posy++) {
+        for (let posx = 0; posx < w; posx++) {
+          const {
+            x,
+            y
+          } = getCoordinatesFromPos(posx, posy);
+          queue.push({
+            useNative,
+            posy,
+            y,
+            posx,
+            x,
+            ITER
+          });
+        }
+      }
+      if (false) {
+        for (let i = 0; i < w*h; i++) {
+          const r = Math.floor(Math.random() * (i + 1));
+          const temp = queue[i];
+          queue[i] = queue[r];
+          queue[r] = temp;
+        }
+      }
+      start();
+    }
+
+    function drawDot(posy, posx, iter) {
+      const idx = (posy * w + posx) * 4;
+      if (iter === ITER) {
+        cImage.data[idx + 0] = 0;
+        cImage.data[idx + 1] = 0;
+        cImage.data[idx + 2] = 0;
+        cImage.data[idx + 3] = 255;
+      } else {
+        const [
+          r, g, b
+        ] = hsl2rgb(iter/ITER, 0.5, 0.5);
+        cImage.data[idx + 0] = r; // 127 + (iter/ITER)*127;
+        cImage.data[idx + 1] = g; // 127 + (iter/ITER)*127;
+        cImage.data[idx + 2] = b; // 127 + (iter/ITER)*127;
+        cImage.data[idx + 3] = 255;
+      }
+      dots++;
+    }
+
+    function render() {
+      ctx.putImageData(cImage, 0, 0);
+      const dps = dots * 1000 / (Date.now() - lastTime);
+      console.log(`${dps} dps (${gcount})`);
+      gcount = Math.max(Math.floor(dps / THREADS / 4), 1);
+      dots = 0;
+      lastTime = Date.now();
+    }
+
+    function start() {
+      if (isPause) {
+        isPause = false;
+        dots = 0;
+        lastTime = Date.now();
+        timer = setInterval(() => {
+          render();
+        }, 1000);
+        for(let t = 0; t < THREADS; t++) {
+          if (queue.length > 0) {
+            threads[t].postMessage(queue.slice(0, gcount));
+            queue = queue.slice(gcount);
+          }
+        }
+      }
+    }
+
+    function pause() {
+      if (!isPause) {
+        isPause = true;
+        clearInterval(timer);
+        render();
+      }
+    }
+
+    flushMandelbrot();
+  </script>
+</html>

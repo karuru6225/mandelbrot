@@ -1,0 +1,16 @@
+{
+  "name": "mandelbrot",
+  "version": "1.0.0",
+  "description": "",
+  "main": "bignumber.min.js",
+  "dependencies": {
+    "http-server": "^0.11.1"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "run": "http-server"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
