@@ -29,15 +29,47 @@
   <script>
     const wrapper = document.getElementById('wrapper');
     const canvas = document.getElementById('canvas');
-    canvas.setAttribute('width', wrapper.offsetWidth);
-    canvas.setAttribute('height', wrapper.offsetHeight);
+    canvas.setAttribute('width', canvas.offsetWidth);
+    canvas.setAttribute('height', canvas.offsetHeight);
     const w = canvas.width;
     const h = canvas.height;
     const ctx = canvas.getContext('2d');
-    const ITER = 50;
+    canvas.addEventListener('click', (e) => {
+      pause();
+      const {
+        x, y
+      } = getCoordinatesFromPos(e.offsetX, e.offsetY);
+      if (useNative) {
+        size /= 2;
+      } else {
+        size = size.div(2);
+      }
+      resetIterCount();
+      center = {
+        x, y
+      };
+      flushMandelbrot();
+    });
     const THREADS = 8;
+    let useNative = true;
+    let ITER;
+    let size;
+    let center;
+    if (useNative) {
+      size = 3;
+      center = {
+        x: -0.8,
+        y: 0
+      };
+    } else {
+      size = new BigNumber(3);
+      center = {
+        x: new BigNumber(-0.8),
+        y: new BigNumber(0)
+      };
+    }
+    resetIterCount();
     let gcount = 500;
-    const useNative = false;
     let cImage;
     let timer;
     let isPause = true;
@@ -56,16 +88,14 @@
           } = item;
           drawDot(posy, posx, iter);
         });
-        if (isPause) {
-          return;
-        }
-        if (queue.length > 0) {
+        if (queue.length > 0 && !isPause) {
           threads[i].postMessage(queue.slice(0, gcount));
           queue = queue.slice(gcount);
         } else {
           if (timer) {
             clearInterval(timer);
             timer = false;
+            isPause = true;
             console.timeEnd('draw');
           }
           render();
@@ -73,25 +103,29 @@
       });
     }
 
+    function resetIterCount() {
+      if (useNative) {
+        // ITER = Math.floor( Math.max(-Math.log10(size) * 500, 40) );
+        ITER = Math.floor(size**(-0.243)*48);
+      } else {
+        // ITER = Math.floor( Math.max(-Math.log10(size.toNumber()) * 500, 40) );
+        ITER = Math.floor(size.pow(-0.243).times(48).toNumber());
+      }
+    }
+
     function getCoordinatesFromPos(posx, posy) {
       if (useNative) {
-        const len = 3 / 2;
-        const x = posx;
         let dx, dy;
         if (w > h) {
-          dx = len;
-          dy = len * h / w;
+          dx = size / 2;
+          dy = size / 2 * h / w;
         } else {
-          dx = len * w / h;
-          dy = len;
+          dx = size / 2 * w / h;
+          dy = size / 2;
         }
 
+        const x = posx;
         const y = posy;
-
-        const center = {
-          x: -0.8,
-          y: 0
-        };
 
         const tx = {
           min: center.x - dx,
@@ -107,23 +141,17 @@
           y: (y / h) * ( ty.max - ty.min ) + ty.min
         };
       } else {
-        const len = (new BigNumber(3)).div(2);
-        const x = new BigNumber(posx);
         let dx, dy;
         if (w > h) {
-          dx = len;
-          dy = len.times(h / w);
+          dx = size.div(2);
+          dy = size.div(2).times(h / w);
         } else {
-          dx = len.times(w / h);
-          dy = len;
+          dx = size.div(2).times(w / h);
+          dy = size.div(2);
         }
 
+        const x = new BigNumber(posx);
         const y = new BigNumber(posy);
-
-        const center = {
-          x: new BigNumber(-0.8),
-          y: new BigNumber(0)
-        };
 
         const tx = {
           min: center.x.minus(dx),
@@ -143,9 +171,16 @@
 
     function flushMandelbrot() {
       console.time('draw');
+      console.log('settings', {
+        ITER,
+        size,
+        x: center.x,
+        y: center.y,
+      });
       ctx.fillStyle = 'white';
       ctx.fillRect(0, 0, w, h);
       cImage = ctx.getImageData(0, 0, w, h);
+      queue = [];
       for (let posy = 0; posy < h; posy++) {
         for (let posx = 0; posx < w; posx++) {
           const {
@@ -183,7 +218,7 @@
       } else {
         const [
           r, g, b
-        ] = hsl2rgb(iter/ITER, 0.5, 0.5);
+        ] = hsl2rgb(iter/ITER, 0.65, 0.5);
         cImage.data[idx + 0] = r; // 127 + (iter/ITER)*127;
         cImage.data[idx + 1] = g; // 127 + (iter/ITER)*127;
         cImage.data[idx + 2] = b; // 127 + (iter/ITER)*127;
@@ -195,7 +230,7 @@
     function render() {
       ctx.putImageData(cImage, 0, 0);
       const dps = dots * 1000 / (Date.now() - lastTime);
-      console.log(`${dps} dps (${gcount})`);
+      // console.log(`${dps} dps (${gcount})`);
       gcount = Math.max(Math.floor(dps / THREADS / 4), 1);
       dots = 0;
       lastTime = Date.now();
